@@ -1,9 +1,460 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Play, Pause, SkipBack, SkipForward, Heart, Radio, Settings, Wifi, WifiOff } from 'lucide-react';
+import { Volume2, VolumeX, Play, Pause, SkipBack, SkipForward, Heart, Radio, Settings, Wifi } from 'lucide-react';
 
 export default function BoseSoundTouchController() {
-  // Copy the entire artifact code here
-  // (All the code from the artifact I created)
+  const [deviceIP, setDeviceIP] = useState('');
+  const [connected, setConnected] = useState(false);
+  const [volume, setVolume] = useState(50);
+  const [muted, setMuted] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [nowPlaying, setNowPlaying] = useState(null);
+  const [presets, setPresets] = useState([]);
+  const [favorites, setFavorites] = useState([]);
+  const [showSettings, setShowSettings] = useState(false);
+  const [error, setError] = useState(null);
+  const wsRef = useRef(null);
+
+  useEffect(() => {
+    const savedIP = localStorage.getItem('boseDeviceIP');
+    const savedFavorites = localStorage.getItem('boseFavorites');
+    
+    if (savedIP) {
+      setDeviceIP(savedIP);
+      connectToDevice(savedIP);
+    }
+    
+    if (savedFavorites) {
+      setFavorites(JSON.parse(savedFavorites));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (deviceIP && connected) {
+      localStorage.setItem('boseDeviceIP', deviceIP);
+    }
+  }, [deviceIP, connected]);
+
+  useEffect(() => {
+    localStorage.setItem('boseFavorites', JSON.stringify(favorites));
+  }, [favorites]);
+
+  const connectToDevice = async (ip) => {
+    try {
+      const response = await fetch(`http://${ip}:8090/info`);
+      if (response.ok) {
+        setConnected(true);
+        setError(null);
+        fetchPresets(ip);
+        fetchNowPlaying(ip);
+        fetchVolume(ip);
+        setupWebSocket(ip);
+      }
+    } catch (err) {
+      setError('Failed to connect. Make sure you\'re on the same network and the IP is correct.');
+      setConnected(false);
+    }
+  };
+
+  const setupWebSocket = (ip) => {
+    try {
+      const ws = new WebSocket(`ws://${ip}:8080`, 'gabbo');
+      
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+      };
+      
+      ws.onmessage = (event) => {
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(event.data, 'text/xml');
+        
+        if (xml.querySelector('volumeUpdated')) {
+          fetchVolume(ip);
+        }
+        
+        if (xml.querySelector('nowPlayingUpdated')) {
+          fetchNowPlaying(ip);
+        }
+        
+        if (xml.querySelector('presetsUpdated')) {
+          fetchPresets(ip);
+        }
+      };
+      
+      ws.onerror = () => {
+        console.log('WebSocket error');
+      };
+      
+      wsRef.current = ws;
+    } catch (err) {
+      console.log('WebSocket not supported, using polling');
+    }
+  };
+
+  const fetchVolume = async (ip) => {
+    try {
+      const response = await fetch(`http://${ip}:8090/volume`);
+      const text = await response.text();
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'text/xml');
+      
+      const actualVol = xml.querySelector('actualvolume')?.textContent;
+      const muteEnabled = xml.querySelector('muteenabled')?.textContent === 'true';
+      
+      if (actualVol) setVolume(parseInt(actualVol));
+      setMuted(muteEnabled);
+    } catch (err) {
+      console.error('Failed to fetch volume', err);
+    }
+  };
+
+  const fetchNowPlaying = async (ip) => {
+    try {
+      const response = await fetch(`http://${ip}:8090/now_playing`);
+      const text = await response.text();
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'text/xml');
+      
+      const playStatus = xml.querySelector('playStatus')?.textContent;
+      const stationName = xml.querySelector('stationName')?.textContent;
+      const track = xml.querySelector('track')?.textContent;
+      const artist = xml.querySelector('artist')?.textContent;
+      const art = xml.querySelector('art')?.textContent;
+      
+      setIsPlaying(playStatus === 'PLAY_STATE');
+      setNowPlaying({
+        station: stationName,
+        track: track,
+        artist: artist,
+        art: art
+      });
+    } catch (err) {
+      console.error('Failed to fetch now playing', err);
+    }
+  };
+
+  const fetchPresets = async (ip) => {
+    try {
+      const response = await fetch(`http://${ip}:8090/presets`);
+      const text = await response.text();
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'text/xml');
+      
+      const presetElements = xml.querySelectorAll('preset');
+      const presetList = Array.from(presetElements).map(preset => ({
+        id: preset.getAttribute('id'),
+        name: preset.querySelector('itemName')?.textContent,
+        source: preset.querySelector('ContentItem')?.getAttribute('source'),
+        location: preset.querySelector('ContentItem')?.getAttribute('location')
+      }));
+      
+      setPresets(presetList);
+    } catch (err) {
+      console.error('Failed to fetch presets', err);
+    }
+  };
+
+  const sendKey = async (key) => {
+    if (!connected) return;
+    
+    try {
+      await fetch(`http://${deviceIP}:8090/key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/xml' },
+        body: `<key state="press" sender="BoseApp">${key}</key>`
+      });
+      
+      await fetch(`http://${deviceIP}:8090/key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/xml' },
+        body: `<key state="release" sender="BoseApp">${key}</key>`
+      });
+    } catch (err) {
+      setError('Failed to send command');
+    }
+  };
+
+  const setVolumeLevel = async (newVolume) => {
+    if (!connected) return;
+    
+    try {
+      await fetch(`http://${deviceIP}:8090/volume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/xml' },
+        body: `<volume>${newVolume}</volume>`
+      });
+      setVolume(newVolume);
+    } catch (err) {
+      setError('Failed to set volume');
+    }
+  };
+
+  const toggleMute = async () => {
+    if (!connected) return;
+    
+    try {
+      await fetch(`http://${deviceIP}:8090/volume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/xml' },
+        body: `<volume>${volume}<muteenabled>${!muted}</muteenabled></volume>`
+      });
+      setMuted(!muted);
+    } catch (err) {
+      setError('Failed to toggle mute');
+    }
+  };
+
+  const selectPreset = async (presetId) => {
+    if (!connected) return;
+    
+    try {
+      await sendKey(`PRESET_${presetId}`);
+    } catch (err) {
+      setError('Failed to select preset');
+    }
+  };
+
+  const addToFavorites = () => {
+    if (!nowPlaying || !nowPlaying.station) return;
+    
+    const newFavorite = {
+      id: Date.now(),
+      name: nowPlaying.station,
+      track: nowPlaying.track,
+      artist: nowPlaying.artist
+    };
+    
+    setFavorites([...favorites, newFavorite]);
+  };
+
+  const removeFavorite = (id) => {
+    setFavorites(favorites.filter(fav => fav.id !== id));
+  };
+
+  const handleConnect = () => {
+    if (deviceIP) {
+      connectToDevice(deviceIP);
+    }
+  };
+
+  if (!connected) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+        <div className="bg-slate-800 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-slate-700">
+          <div className="text-center mb-8">
+            <div className="bg-gradient-to-br from-orange-500 to-red-600 w-20 h-20 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg">
+              <Radio className="w-10 h-10 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-white mb-2">SoundTouch</h1>
+            <p className="text-slate-400">Connect to your Bose device</p>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                Device IP Address
+              </label>
+              <input
+                type="text"
+                placeholder="192.168.1.100"
+                value={deviceIP}
+                onChange={(e) => setDeviceIP(e.target.value)}
+                className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                onKeyPress={(e) => e.key === 'Enter' && handleConnect()}
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                Find this in your router settings or Bose app
+              </p>
+            </div>
+            
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 text-red-400 text-sm">
+                {error}
+              </div>
+            )}
+            
+            <button
+              onClick={handleConnect}
+              className="w-full bg-gradient-to-r from-orange-500 to-red-600 text-white py-3 rounded-lg font-semibold hover:from-orange-600 hover:to-red-700 transition-all shadow-lg"
+            >
+              Connect
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-4">
+      <div className="max-w-2xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="bg-gradient-to-br from-orange-500 to-red-600 w-12 h-12 rounded-xl flex items-center justify-center shadow-lg">
+              <Radio className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold">SoundTouch</h1>
+              <p className="text-sm text-slate-400 flex items-center gap-1">
+                <Wifi className="w-3 h-3" />
+                {deviceIP}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+        </div>
+
+        {nowPlaying && (
+          <div className="bg-slate-800 rounded-2xl p-6 mb-6 border border-slate-700 shadow-xl">
+            <div className="flex items-start gap-4 mb-6">
+              <div className="w-24 h-24 bg-gradient-to-br from-orange-500 to-red-600 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg">
+                <Radio className="w-12 h-12 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-xl font-bold mb-1 truncate">{nowPlaying.station || 'No Station'}</h2>
+                {nowPlaying.track && <p className="text-slate-300 truncate">{nowPlaying.track}</p>}
+                {nowPlaying.artist && <p className="text-slate-400 text-sm truncate">{nowPlaying.artist}</p>}
+              </div>
+              <button
+                onClick={addToFavorites}
+                className="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
+                title="Add to favorites"
+              >
+                <Heart className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-center gap-4 mb-6">
+              <button
+                onClick={() => sendKey('PREV_TRACK')}
+                className="p-3 rounded-full bg-slate-700 hover:bg-slate-600 transition-colors"
+              >
+                <SkipBack className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => sendKey('PLAY_PAUSE')}
+                className="p-5 rounded-full bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 transition-all shadow-lg"
+              >
+                {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
+              </button>
+              <button
+                onClick={() => sendKey('NEXT_TRACK')}
+                className="p-3 rounded-full bg-slate-700 hover:bg-slate-600 transition-colors"
+              >
+                <SkipForward className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <button
+                onClick={toggleMute}
+                className="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
+              >
+                {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+              </button>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={volume}
+                onChange={(e) => setVolumeLevel(parseInt(e.target.value))}
+                className="flex-1 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500"
+              />
+              <span className="text-sm font-medium w-12 text-right">{volume}%</span>
+            </div>
+          </div>
+        )}
+
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-3">Presets</h3>
+          <div className="grid grid-cols-3 gap-3">
+            {[1, 2, 3, 4, 5, 6].map(num => {
+              const preset = presets.find(p => p.id === num.toString());
+              return (
+                <button
+                  key={num}
+                  onClick={() => selectPreset(num)}
+                  className="bg-slate-800 hover:bg-slate-700 rounded-xl p-4 border border-slate-700 transition-colors text-left"
+                >
+                  <div className="text-orange-500 font-bold mb-1">{num}</div>
+                  <div className="text-sm truncate">{preset?.name || 'Empty'}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <h3 className="text-lg font-semibold mb-3">My Favorites</h3>
+          {favorites.length === 0 ? (
+            <div className="bg-slate-800 rounded-xl p-6 text-center border border-slate-700">
+              <Heart className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+              <p className="text-slate-400 text-sm">No favorites yet. Play a station and tap the heart to save it!</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {favorites.map(fav => (
+                <div
+                  key={fav.id}
+                  className="bg-slate-800 rounded-xl p-4 border border-slate-700 flex items-center justify-between hover:bg-slate-750 transition-colors"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{fav.name}</p>
+                    {fav.artist && <p className="text-sm text-slate-400 truncate">{fav.artist}</p>}
+                  </div>
+                  <button
+                    onClick={() => removeFavorite(fav.id)}
+                    className="ml-3 p-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
+                  >
+                    <Heart className="w-4 h-4 fill-current" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {showSettings && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setShowSettings(false)}>
+            <div className="bg-slate-800 rounded-2xl p-6 max-w-md w-full border border-slate-700" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-xl font-bold mb-4">Settings</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Device IP</label>
+                  <input
+                    type="text"
+                    value={deviceIP}
+                    onChange={(e) => setDeviceIP(e.target.value)}
+                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    setConnected(false);
+                    setShowSettings(false);
+                    if (wsRef.current) wsRef.current.close();
+                  }}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg transition-colors"
+                >
+                  Disconnect
+                </button>
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
