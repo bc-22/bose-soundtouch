@@ -133,31 +133,29 @@ export default function BoseSoundTouchController() {
     setSearchResults([]);
     
     try {
-      // Search TuneIn via the Bose API
-      const searchXml = `<search><query>${query}</query></search>`;
-      const response = await fetch(`/api/bose?endpoint=/search&ip=${deviceIP}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: searchXml
-      });
+      // Use TuneIn's public search API
+      const response = await fetch(`https://opml.radiotime.com/Search.ashx?query=${encodeURIComponent(query)}&render=json`);
+      const data = await response.json();
       
-      const text = await response.text();
-      const parser = new DOMParser();
-      const xml = parser.parseFromString(text, 'text/xml');
-      
-      // Parse search results
-      const items = xml.querySelectorAll('item');
-      const results = Array.from(items).map(item => ({
-        name: item.querySelector('itemName')?.textContent,
-        location: item.getAttribute('location'),
-        source: item.getAttribute('source') || 'TUNEIN',
-        type: item.getAttribute('type')
-      })).filter(r => r.name && r.location);
-      
-      setSearchResults(results);
+      if (data.body && data.body.length > 0) {
+        const results = data.body
+          .filter(item => item.type === 'audio')
+          .slice(0, 20)
+          .map(item => ({
+            name: item.text,
+            location: item.URL || item.guide_id,
+            source: 'TUNEIN',
+            type: item.subtext || 'Radio Station',
+            preset_id: item.preset_id || item.guide_id
+          }));
+        
+        setSearchResults(results);
+      } else {
+        setError('No results found. Try a different search.');
+      }
     } catch (err) {
       console.error('Search failed:', err);
-      setError('Search failed. Try searching for a station name.');
+      setError('Search failed. Check your internet connection.');
     } finally {
       setSearching(false);
     }
@@ -165,17 +163,30 @@ export default function BoseSoundTouchController() {
 
   const playStation = async (station) => {
     try {
-      const selectXml = `<ContentItem source="${station.source}" location="${station.location}" sourceAccount=""><itemName>${station.name}</itemName></ContentItem>`;
+      // For TuneIn stations, we need to get the actual stream URL first
+      let location = station.location;
       
-      await fetch(`/api/bose?endpoint=/select&ip=${deviceIP}`, {
+      // If it's a TuneIn guide_id or preset_id, construct the proper location
+      if (location && !location.startsWith('http') && !location.startsWith('/')) {
+        location = `/v1/playback/station/${location}`;
+      }
+      
+      const selectXml = `<ContentItem source="TUNEIN" type="stationurl" location="${location}" sourceAccount=""><itemName>${station.name}</itemName></ContentItem>`;
+      
+      const response = await fetch(`/api/bose?endpoint=/select&ip=${deviceIP}`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: selectXml
       });
       
-      // Wait a bit then fetch now playing
-      setTimeout(() => fetchNowPlaying(deviceIP), 1000);
-      setShowSearch(false);
+      if (response.ok) {
+        setTimeout(() => fetchNowPlaying(deviceIP), 1000);
+        setShowSearch(false);
+      } else {
+        const text = await response.text();
+        console.error('Play failed:', text);
+        setError('Failed to play station. It may not be compatible.');
+      }
     } catch (err) {
       console.error('Failed to play station:', err);
       setError('Failed to play station');
