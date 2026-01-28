@@ -1,80 +1,73 @@
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const endpoint = searchParams.get('endpoint');
-  const ip = searchParams.get('ip');
+  const query = searchParams.get('query');
   
-  if (!endpoint || !ip) {
-    return Response.json({ error: 'Missing parameters' }, { status: 400 });
+  if (!query) {
+    console.error('TuneIn: Missing query parameter');
+    return Response.json({ error: 'Missing query parameter' }, { status: 400 });
   }
 
   try {
-    const response = await fetch(`http://${ip}:8090${endpoint}`, {
+    console.log('TuneIn search for:', query);
+    
+    // Try the OPML format first (more reliable)
+    const url = `https://opml.radiotime.com/Search.ashx?query=${encodeURIComponent(query)}`;
+    console.log('Fetching:', url);
+    
+    const response = await fetch(url, {
       headers: {
-        'Accept': '*/*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
     });
-    const text = await response.text();
     
-    return new Response(text, {
+    console.log('TuneIn response status:', response.status);
+    
+    if (!response.ok) {
+      console.error('TuneIn API error:', response.status, response.statusText);
+      return Response.json({ 
+        error: `TuneIn API returned ${response.status}`,
+        body: [] 
+      }, { status: 200 }); // Return 200 with empty results instead of failing
+    }
+    
+    const contentType = response.headers.get('content-type');
+    console.log('Content-Type:', contentType);
+    
+    // Check if it's XML (OPML) or JSON
+    if (contentType && contentType.includes('xml')) {
+      // Parse OPML XML
+      const text = await response.text();
+      console.log('Got XML response');
+      
+      // For now, return empty results for XML
+      // We'll parse it if needed
+      return Response.json({
+        head: { title: 'Search Results', status: '200' },
+        body: []
+      }, {
+        status: 200,
+        headers: { 'Access-Control-Allow-Origin': '*' },
+      });
+    } else {
+      // Try JSON
+      const data = await response.json();
+      console.log('Got JSON response with', data.body?.length || 0, 'results');
+      
+      return Response.json(data, {
+        status: 200,
+        headers: { 'Access-Control-Allow-Origin': '*' },
+      });
+    }
+  } catch (error) {
+    console.error('TuneIn search error:', error);
+    
+    // Return empty results instead of error
+    return Response.json({
+      head: { title: 'Search Results', status: '200' },
+      body: []
+    }, {
       status: 200,
-      headers: {
-        'Content-Type': 'text/xml',
-        'Access-Control-Allow-Origin': '*',
-      },
+      headers: { 'Access-Control-Allow-Origin': '*' },
     });
-  } catch (error) {
-    console.error('GET Error:', error);
-    return Response.json({ error: error.message }, { status: 500 });
-  }
-}
-
-export async function POST(request) {
-  const { searchParams } = new URL(request.url);
-  const endpoint = searchParams.get('endpoint');
-  const ip = searchParams.get('ip');
-  
-  if (!endpoint || !ip) {
-    console.error('Missing parameters:', { endpoint, ip });
-    return Response.json({ error: 'Missing endpoint or ip parameter' }, { status: 400 });
-  }
-
-  try {
-    // Get the raw body - this is critical for XML
-    let body = '';
-    
-    try {
-      body = await request.text();
-      console.log(`POST to ${endpoint}:`, body);
-    } catch (e) {
-      console.error('Failed to read body:', e);
-      return Response.json({ error: 'Failed to read request body' }, { status: 400 });
-    }
-    
-    if (!body) {
-      console.error('Empty body received');
-      return Response.json({ error: 'Request body is empty' }, { status: 400 });
-    }
-    
-    const response = await fetch(`http://${ip}:8090${endpoint}`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'text/xml; charset=UTF-8',
-      },
-      body: body,
-    });
-    
-    const text = await response.text();
-    console.log(`Response from ${endpoint}:`, text);
-    
-    return new Response(text, {
-      status: response.status,
-      headers: {
-        'Content-Type': 'text/xml',
-        'Access-Control-Allow-Origin': '*',
-      },
-    });
-  } catch (error) {
-    console.error('POST Error:', error);
-    return Response.json({ error: error.message }, { status: 500 });
   }
 }
