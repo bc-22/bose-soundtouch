@@ -59,3 +59,14 @@ export async function POST(request) {
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
+```
+
+---
+
+## Step-by-Step Fix
+
+1. **Replace `app/page.js`** with the code from the artifact above
+
+2. **Create the folder structure:**
+```
+   C:\Users\chris\Documents\bose-soundtouch\app\api\bose\
