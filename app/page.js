@@ -14,6 +14,9 @@ export default function BoseSoundTouchController() {
   const [favorites, setFavorites] = useState([]);
   const [showSettings, setShowSettings] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showManualAdd, setShowManualAdd] = useState(false);
+  const [manualStationId, setManualStationId] = useState('');
+  const [manualStationName, setManualStationName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -329,7 +332,53 @@ export default function BoseSoundTouchController() {
     }
   };
 
-  const addToFavorites = () => {
+  const addManualStation = async () => {
+    if (!manualStationId.trim() || !manualStationName.trim()) {
+      setError('Please enter both station ID and name');
+      return;
+    }
+    
+    try {
+      const selectXml = `<ContentItem source="TUNEIN" location="${manualStationId}"><itemName>${manualStationName}</itemName></ContentItem>`;
+      
+      const response = await fetch(`/api/bose?endpoint=/select&ip=${deviceIP}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: selectXml
+      });
+      
+      const responseText = await response.text();
+      
+      if (response.ok && !responseText.includes('error')) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: `<key state="press" sender="BoseApp">PLAY</key>`
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: `<key state="release" sender="BoseApp">PLAY</key>`
+        });
+        
+        setTimeout(() => fetchNowPlaying(deviceIP), 500);
+        setShowManualAdd(false);
+        setManualStationId('');
+        setManualStationName('');
+        setError(null);
+      } else {
+        setError('Failed to play station');
+      }
+    } catch (err) {
+      console.error('Failed to add manual station:', err);
+      setError('Failed to add station');
+    }
+  };
     if (!nowPlaying || !nowPlaying.station) return;
     
     const newFavorite = {
@@ -473,6 +522,13 @@ export default function BoseSoundTouchController() {
               <Search className="w-5 h-5" />
             </button>
             <button
+              onClick={() => setShowManualAdd(true)}
+              className="p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
+              title="Add Station by ID"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+            <button
               onClick={() => setShowSettings(!showSettings)}
               className="p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
             >
@@ -610,6 +666,69 @@ export default function BoseSoundTouchController() {
             </div>
           )}
         </div>
+
+        {showManualAdd && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setShowManualAdd(false)}>
+            <div className="bg-slate-800 rounded-2xl p-6 max-w-md w-full border border-slate-700" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-xl font-bold mb-4">Add Station by ID</h3>
+              
+              <div className="space-y-4 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Station ID</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., s254741"
+                    value={manualStationId}
+                    onChange={(e) => setManualStationId(e.target.value)}
+                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">From TuneIn URL or search results</p>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Station Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., Radio X UK"
+                    value={manualStationName}
+                    onChange={(e) => setManualStationName(e.target.value)}
+                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-slate-700 rounded-lg p-3 mb-4 text-sm">
+                <p className="text-slate-300 mb-2">Popular station IDs:</p>
+                <div className="space-y-1 text-slate-400">
+                  <p>• BBC Radio 1: <code className="text-orange-400">s24939</code></p>
+                  <p>• BBC Radio 2: <code className="text-orange-400">s24940</code></p>
+                  <p>• Radio X UK: <code className="text-orange-400">s254741</code></p>
+                  <p>• Classic FM: <code className="text-orange-400">s8439</code></p>
+                  <p>• Absolute Radio: <code className="text-orange-400">s44491</code></p>
+                </div>
+              </div>
+              
+              <div className="flex gap-2">
+                <button
+                  onClick={addManualStation}
+                  className="flex-1 bg-orange-500 hover:bg-orange-600 text-white py-2 rounded-lg transition-colors"
+                >
+                  Play Station
+                </button>
+                <button
+                  onClick={() => {
+                    setShowManualAdd(false);
+                    setManualStationId('');
+                    setManualStationName('');
+                  }}
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showSearch && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setShowSearch(false)}>
