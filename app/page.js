@@ -88,17 +88,26 @@ export default function BoseSoundTouchController() {
       const track = xml.querySelector('track')?.textContent;
       const artist = xml.querySelector('artist')?.textContent;
       const art = xml.querySelector('art')?.textContent;
-      const source = xml.querySelector('ContentItem')?.getAttribute('source');
-      const location = xml.querySelector('ContentItem')?.getAttribute('location');
+      const contentItem = xml.querySelector('ContentItem');
+      const source = contentItem?.getAttribute('source');
+      const location = contentItem?.getAttribute('location');
       
-      setIsPlaying(playStatus === 'PLAY_STATE');
+      const isCurrentlyPlaying = playStatus === 'PLAY_STATE';
+      
+      setIsPlaying(isCurrentlyPlaying);
       setNowPlaying({
-        station: stationName,
-        track: track,
+        station: stationName || track || 'Unknown Station',
+        track: track !== stationName ? track : null,
         artist: artist,
         art: art,
         source: source,
         location: location
+      });
+      
+      console.log('Now playing updated:', {
+        station: stationName,
+        playing: isCurrentlyPlaying,
+        source: source
       });
     } catch (err) {
       console.error('Failed to fetch now playing', err);
@@ -183,8 +192,12 @@ export default function BoseSoundTouchController() {
       });
       
       if (response.ok) {
-        setTimeout(() => fetchNowPlaying(deviceIP), 1000);
+        // Multiple attempts to get updated status
+        setTimeout(() => fetchNowPlaying(deviceIP), 500);
+        setTimeout(() => fetchNowPlaying(deviceIP), 1500);
+        setTimeout(() => fetchNowPlaying(deviceIP), 3000);
         setShowSearch(false);
+        setError(null);
       } else {
         const text = await response.text();
         console.error('Play failed:', text);
