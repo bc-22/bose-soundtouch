@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Play, Pause, SkipBack, SkipForward, Heart, Radio, Settings, Wifi } from 'lucide-react';
+import { Volume2, VolumeX, Play, Pause, SkipBack, SkipForward, Heart, Radio, Settings, Wifi, Search, Plus } from 'lucide-react';
 
 export default function BoseSoundTouchController() {
   const [deviceIP, setDeviceIP] = useState('');
@@ -13,6 +13,10 @@ export default function BoseSoundTouchController() {
   const [presets, setPresets] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState(null);
   const wsRef = useRef(null);
 
@@ -84,13 +88,17 @@ export default function BoseSoundTouchController() {
       const track = xml.querySelector('track')?.textContent;
       const artist = xml.querySelector('artist')?.textContent;
       const art = xml.querySelector('art')?.textContent;
+      const source = xml.querySelector('ContentItem')?.getAttribute('source');
+      const location = xml.querySelector('ContentItem')?.getAttribute('location');
       
       setIsPlaying(playStatus === 'PLAY_STATE');
       setNowPlaying({
         station: stationName,
         track: track,
         artist: artist,
-        art: art
+        art: art,
+        source: source,
+        location: location
       });
     } catch (err) {
       console.error('Failed to fetch now playing', err);
@@ -118,15 +126,93 @@ export default function BoseSoundTouchController() {
     }
   };
 
+  const searchTuneIn = async (query) => {
+    if (!query.trim()) return;
+    
+    setSearching(true);
+    setSearchResults([]);
+    
+    try {
+      // Search TuneIn via the Bose API
+      const searchXml = `<search><query>${query}</query></search>`;
+      const response = await fetch(`/api/bose?endpoint=/search&ip=${deviceIP}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: searchXml
+      });
+      
+      const text = await response.text();
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'text/xml');
+      
+      // Parse search results
+      const items = xml.querySelectorAll('item');
+      const results = Array.from(items).map(item => ({
+        name: item.querySelector('itemName')?.textContent,
+        location: item.getAttribute('location'),
+        source: item.getAttribute('source') || 'TUNEIN',
+        type: item.getAttribute('type')
+      })).filter(r => r.name && r.location);
+      
+      setSearchResults(results);
+    } catch (err) {
+      console.error('Search failed:', err);
+      setError('Search failed. Try searching for a station name.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const playStation = async (station) => {
+    try {
+      const selectXml = `<ContentItem source="${station.source}" location="${station.location}" sourceAccount=""><itemName>${station.name}</itemName></ContentItem>`;
+      
+      await fetch(`/api/bose?endpoint=/select&ip=${deviceIP}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: selectXml
+      });
+      
+      // Wait a bit then fetch now playing
+      setTimeout(() => fetchNowPlaying(deviceIP), 1000);
+      setShowSearch(false);
+    } catch (err) {
+      console.error('Failed to play station:', err);
+      setError('Failed to play station');
+    }
+  };
+
+  const saveToPreset = async (presetNumber) => {
+    if (!nowPlaying || !nowPlaying.source || !nowPlaying.location) {
+      setError('No station currently playing to save');
+      return;
+    }
+    
+    try {
+      const presetXml = `<preset id="${presetNumber}"><ContentItem source="${nowPlaying.source}" location="${nowPlaying.location}" sourceAccount=""><itemName>${nowPlaying.station}</itemName></ContentItem></preset>`;
+      
+      await fetch(`/api/bose?endpoint=/preset&ip=${deviceIP}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: presetXml
+      });
+      
+      // Refresh presets
+      fetchPresets(deviceIP);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to save preset:', err);
+      setError('Failed to save preset');
+    }
+  };
+
   const sendKey = async (key) => {
     if (!connected) return;
     
     try {
       await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'text/plain',
-        },
+        headers: { 'Content-Type': 'text/plain' },
         body: `<key state="press" sender="BoseApp">${key}</key>`
       });
       
@@ -134,9 +220,7 @@ export default function BoseSoundTouchController() {
       
       await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'text/plain',
-        },
+        headers: { 'Content-Type': 'text/plain' },
         body: `<key state="release" sender="BoseApp">${key}</key>`
       });
     } catch (err) {
@@ -151,21 +235,15 @@ export default function BoseSoundTouchController() {
     try {
       const response = await fetch(`/api/bose?endpoint=/volume&ip=${deviceIP}`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'text/plain',
-        },
+        headers: { 'Content-Type': 'text/plain' },
         body: `<volume>${newVolume}</volume>`
       });
       
       if (response.ok) {
         setVolume(newVolume);
-      } else {
-        const text = await response.text();
-        console.error('Volume error:', text);
       }
     } catch (err) {
       console.error('Failed to set volume:', err);
-      setError('Failed to set volume');
     }
   };
 
@@ -175,21 +253,15 @@ export default function BoseSoundTouchController() {
     try {
       const response = await fetch(`/api/bose?endpoint=/volume&ip=${deviceIP}`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'text/plain',
-        },
+        headers: { 'Content-Type': 'text/plain' },
         body: `<volume>${volume}<muteenabled>${!muted}</muteenabled></volume>`
       });
       
       if (response.ok) {
         setMuted(!muted);
-      } else {
-        const text = await response.text();
-        console.error('Mute error:', text);
       }
     } catch (err) {
       console.error('Failed to toggle mute:', err);
-      setError('Failed to toggle mute');
     }
   };
 
@@ -198,6 +270,7 @@ export default function BoseSoundTouchController() {
     
     try {
       await sendKey(`PRESET_${presetId}`);
+      setTimeout(() => fetchNowPlaying(deviceIP), 500);
     } catch (err) {
       setError('Failed to select preset');
     }
@@ -210,10 +283,31 @@ export default function BoseSoundTouchController() {
       id: Date.now(),
       name: nowPlaying.station,
       track: nowPlaying.track,
-      artist: nowPlaying.artist
+      artist: nowPlaying.artist,
+      source: nowPlaying.source,
+      location: nowPlaying.location
     };
     
     setFavorites([...favorites, newFavorite]);
+  };
+
+  const playFavorite = async (favorite) => {
+    if (!favorite.source || !favorite.location) return;
+    
+    try {
+      const selectXml = `<ContentItem source="${favorite.source}" location="${favorite.location}" sourceAccount=""><itemName>${favorite.name}</itemName></ContentItem>`;
+      
+      await fetch(`/api/bose?endpoint=/select&ip=${deviceIP}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: selectXml
+      });
+      
+      setTimeout(() => fetchNowPlaying(deviceIP), 1000);
+    } catch (err) {
+      console.error('Failed to play favorite:', err);
+      setError('Failed to play favorite');
+    }
   };
 
   const removeFavorite = (id) => {
@@ -290,13 +384,29 @@ export default function BoseSoundTouchController() {
               </p>
             </div>
           </div>
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className="p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowSearch(true)}
+              className="p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
+              title="Search TuneIn Radio"
+            >
+              <Search className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </div>
         </div>
+
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 text-red-400 text-sm mb-4">
+            {error}
+            <button onClick={() => setError(null)} className="ml-2 underline">Dismiss</button>
+          </div>
+        )}
 
         {nowPlaying && (
           <div className="bg-slate-800 rounded-2xl p-6 mb-6 border border-slate-700 shadow-xl">
@@ -365,14 +475,24 @@ export default function BoseSoundTouchController() {
             {[1, 2, 3, 4, 5, 6].map(num => {
               const preset = presets.find(p => p.id === num.toString());
               return (
-                <button
-                  key={num}
-                  onClick={() => selectPreset(num)}
-                  className="bg-slate-800 hover:bg-slate-700 rounded-xl p-4 border border-slate-700 transition-colors text-left"
-                >
-                  <div className="text-orange-500 font-bold mb-1">{num}</div>
-                  <div className="text-sm truncate">{preset?.name || 'Empty'}</div>
-                </button>
+                <div key={num} className="relative">
+                  <button
+                    onClick={() => selectPreset(num)}
+                    className="w-full bg-slate-800 hover:bg-slate-700 rounded-xl p-4 border border-slate-700 transition-colors text-left"
+                  >
+                    <div className="text-orange-500 font-bold mb-1">{num}</div>
+                    <div className="text-sm truncate">{preset?.name || 'Empty'}</div>
+                  </button>
+                  {nowPlaying && (
+                    <button
+                      onClick={() => saveToPreset(num)}
+                      className="absolute top-2 right-2 p-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
+                      title="Save current station here"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -392,10 +512,13 @@ export default function BoseSoundTouchController() {
                   key={fav.id}
                   className="bg-slate-800 rounded-xl p-4 border border-slate-700 flex items-center justify-between hover:bg-slate-750 transition-colors"
                 >
-                  <div className="flex-1 min-w-0">
+                  <button
+                    onClick={() => playFavorite(fav)}
+                    className="flex-1 min-w-0 text-left"
+                  >
                     <p className="font-medium truncate">{fav.name}</p>
                     {fav.artist && <p className="text-sm text-slate-400 truncate">{fav.artist}</p>}
-                  </div>
+                  </button>
                   <button
                     onClick={() => removeFavorite(fav.id)}
                     className="ml-3 p-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
@@ -407,6 +530,59 @@ export default function BoseSoundTouchController() {
             </div>
           )}
         </div>
+
+        {showSearch && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setShowSearch(false)}>
+            <div className="bg-slate-800 rounded-2xl p-6 max-w-2xl w-full border border-slate-700 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-xl font-bold mb-4">Search TuneIn Radio</h3>
+              
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  placeholder="Search for stations..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && searchTuneIn(searchQuery)}
+                  className="flex-1 px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  autoFocus
+                />
+                <button
+                  onClick={() => searchTuneIn(searchQuery)}
+                  disabled={searching}
+                  className="px-6 py-2 bg-orange-500 hover:bg-orange-600 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {searching ? 'Searching...' : 'Search'}
+                </button>
+              </div>
+
+              {searchResults.length > 0 && (
+                <div className="space-y-2">
+                  {searchResults.map((result, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => playStation(result)}
+                      className="w-full bg-slate-700 hover:bg-slate-600 rounded-lg p-3 text-left transition-colors"
+                    >
+                      <p className="font-medium">{result.name}</p>
+                      <p className="text-xs text-slate-400">{result.type}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {!searching && searchResults.length === 0 && searchQuery && (
+                <p className="text-slate-400 text-center py-8">No results found. Try a different search.</p>
+              )}
+
+              <button
+                onClick={() => setShowSearch(false)}
+                className="w-full mt-4 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
 
         {showSettings && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setShowSettings(false)}>
