@@ -192,6 +192,24 @@ export default function BoseSoundTouchController() {
       });
       
       if (response.ok) {
+        // Wait a moment for the station to be selected
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Send PLAY command to start playback
+        await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: `<key state="press" sender="BoseApp">PLAY</key>`
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: `<key state="release" sender="BoseApp">PLAY</key>`
+        });
+        
         // Multiple attempts to get updated status
         setTimeout(() => fetchNowPlaying(deviceIP), 500);
         setTimeout(() => fetchNowPlaying(deviceIP), 1500);
@@ -322,7 +340,7 @@ export default function BoseSoundTouchController() {
     if (!favorite.source || !favorite.location) return;
     
     try {
-      const selectXml = `<ContentItem source="${favorite.source}" location="${favorite.location}" sourceAccount=""><itemName>${favorite.name}</itemName></ContentItem>`;
+      const selectXml = `<ContentItem source="${favorite.source}" type="stationurl" location="${favorite.location}" sourceAccount=""><itemName>${favorite.name}</itemName></ContentItem>`;
       
       await fetch(`/api/bose?endpoint=/select&ip=${deviceIP}`, {
         method: 'POST',
@@ -330,7 +348,25 @@ export default function BoseSoundTouchController() {
         body: selectXml
       });
       
-      setTimeout(() => fetchNowPlaying(deviceIP), 1000);
+      // Wait a moment then send PLAY command
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: `<key state="press" sender="BoseApp">PLAY</key>`
+      });
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: `<key state="release" sender="BoseApp">PLAY</key>`
+      });
+      
+      setTimeout(() => fetchNowPlaying(deviceIP), 500);
+      setTimeout(() => fetchNowPlaying(deviceIP), 1500);
     } catch (err) {
       console.error('Failed to play favorite:', err);
       setError('Failed to play favorite');
