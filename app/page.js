@@ -133,8 +133,8 @@ export default function BoseSoundTouchController() {
     setSearchResults([]);
     
     try {
-      // Use TuneIn's public search API
-      const response = await fetch(`https://opml.radiotime.com/Search.ashx?query=${encodeURIComponent(query)}&render=json`);
+      // Use our API proxy to search TuneIn
+      const response = await fetch(`/api/tunein?query=${encodeURIComponent(query)}`);
       const data = await response.json();
       
       if (data.body && data.body.length > 0) {
@@ -150,6 +150,9 @@ export default function BoseSoundTouchController() {
           }));
         
         setSearchResults(results);
+        if (results.length === 0) {
+          setError('No stations found. Try a different search.');
+        }
       } else {
         setError('No results found. Try a different search.');
       }
