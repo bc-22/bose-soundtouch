@@ -175,15 +175,21 @@ export default function BoseSoundTouchController() {
 
   const playStation = async (station) => {
     try {
-      // For TuneIn stations, we need to get the actual stream URL first
+      // For TuneIn stations, use the guide_id format
       let location = station.location;
       
-      // If it's a TuneIn guide_id or preset_id, construct the proper location
-      if (location && !location.startsWith('http') && !location.startsWith('/')) {
-        location = `/v1/playback/station/${location}`;
+      // Extract station ID from URL if needed
+      if (location && location.includes('Tune.ashx?id=')) {
+        const match = location.match(/id=([^&]+)/);
+        if (match) {
+          location = match[1];
+        }
       }
       
-      const selectXml = `<ContentItem source="TUNEIN" type="stationurl" location="${location}" sourceAccount=""><itemName>${station.name}</itemName></ContentItem>`;
+      // Simple XML format that Bose accepts
+      const selectXml = `<ContentItem source="TUNEIN" location="${location}"><itemName>${station.name}</itemName></ContentItem>`;
+      
+      console.log('Sending:', selectXml);
       
       const response = await fetch(`/api/bose?endpoint=/select&ip=${deviceIP}`, {
         method: 'POST',
@@ -191,7 +197,10 @@ export default function BoseSoundTouchController() {
         body: selectXml
       });
       
-      if (response.ok) {
+      const responseText = await response.text();
+      console.log('Response:', responseText);
+      
+      if (response.ok && !responseText.includes('error')) {
         // Wait a moment for the station to be selected
         await new Promise(resolve => setTimeout(resolve, 500));
         
@@ -217,9 +226,8 @@ export default function BoseSoundTouchController() {
         setShowSearch(false);
         setError(null);
       } else {
-        const text = await response.text();
-        console.error('Play failed:', text);
-        setError('Failed to play station. It may not be compatible.');
+        console.error('Play failed:', responseText);
+        setError('Failed to play station. Try another one.');
       }
     } catch (err) {
       console.error('Failed to play station:', err);
@@ -340,7 +348,16 @@ export default function BoseSoundTouchController() {
     if (!favorite.source || !favorite.location) return;
     
     try {
-      const selectXml = `<ContentItem source="${favorite.source}" type="stationurl" location="${favorite.location}" sourceAccount=""><itemName>${favorite.name}</itemName></ContentItem>`;
+      // Extract station ID if it's a URL
+      let location = favorite.location;
+      if (location && location.includes('Tune.ashx?id=')) {
+        const match = location.match(/id=([^&]+)/);
+        if (match) {
+          location = match[1];
+        }
+      }
+      
+      const selectXml = `<ContentItem source="${favorite.source}" location="${location}"><itemName>${favorite.name}</itemName></ContentItem>`;
       
       await fetch(`/api/bose?endpoint=/select&ip=${deviceIP}`, {
         method: 'POST',
