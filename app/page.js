@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Volume2, VolumeX, Play, Pause, SkipBack, SkipForward, Heart, Radio, Settings, Wifi, Plus, Power } from 'lucide-react';
+import { Volume2, VolumeX, Play, Pause, SkipBack, SkipForward, Heart, Radio, Settings, Wifi, Plus, Power, Search } from 'lucide-react';
 
 export default function BoseSoundTouchController() {
   const [deviceIP, setDeviceIP] = useState('');
@@ -14,9 +14,10 @@ export default function BoseSoundTouchController() {
   const [presets, setPresets] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [showSettings, setShowSettings] = useState(false);
-  const [showManualAdd, setShowManualAdd] = useState(false);
-  const [manualStationId, setManualStationId] = useState('');
-  const [manualStationName, setManualStationName] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -83,6 +84,81 @@ export default function BoseSoundTouchController() {
     }
   };
 
+  const searchRadioStations = async (query) => {
+    if (!query.trim()) return;
+    
+    setSearching(true);
+    setSearchResults([]);
+    
+    try {
+      const response = await fetch(`/api/radio-browser?query=${encodeURIComponent(query)}`);
+      const data = await response.json();
+      
+      if (data && data.length > 0) {
+        setSearchResults(data.slice(0, 20));
+      } else {
+        setError('No stations found. Try a different search.');
+        setSearchResults([]);
+      }
+    } catch (err) {
+      console.error('Search failed:', err);
+      setError('Search failed. Please try again.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const playRadioStation = async (station) => {
+    if (!station.url_resolved) {
+      setError('This station has no playable stream URL');
+      return;
+    }
+    
+    try {
+      // Create a ContentItem with the direct stream URL
+      const selectXml = `<ContentItem source="INTERNET_RADIO" location="${station.url_resolved}"><itemName>${station.name}</itemName></ContentItem>`;
+      
+      console.log('Playing station:', station.name, station.url_resolved);
+      
+      const response = await fetch(`/api/bose?endpoint=/select&ip=${deviceIP}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: selectXml
+      });
+      
+      const responseText = await response.text();
+      
+      if (response.ok && !responseText.includes('error')) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: `<key state="press" sender="Gabbo">PLAY</key>`
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: `<key state="release" sender="Gabbo">PLAY</key>`
+        });
+        
+        setTimeout(() => fetchNowPlaying(deviceIP), 500);
+        setTimeout(() => fetchNowPlaying(deviceIP), 1500);
+        setShowSearch(false);
+        setError(null);
+      } else {
+        console.error('Play failed:', responseText);
+        setError('Failed to play station. The stream format may not be compatible.');
+      }
+    } catch (err) {
+      console.error('Failed to play station:', err);
+      setError('Failed to play station');
+    }
+  };
+
   const fetchVolume = async (ip) => {
     try {
       const response = await fetch(`/api/bose?endpoint=/volume&ip=${ip}`);
@@ -146,54 +222,6 @@ export default function BoseSoundTouchController() {
       setPresets(presetList);
     } catch (err) {
       console.error('Failed to fetch presets', err);
-    }
-  };
-
-  const addManualStation = async () => {
-    if (!manualStationId.trim() || !manualStationName.trim()) {
-      setError('Please enter both station ID and name');
-      return;
-    }
-    
-    try {
-      const selectXml = `<ContentItem source="TUNEIN" location="${manualStationId}"><itemName>${manualStationName}</itemName></ContentItem>`;
-      
-      const response = await fetch(`/api/bose?endpoint=/select&ip=${deviceIP}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: selectXml
-      });
-      
-      const responseText = await response.text();
-      
-      if (response.ok && !responseText.includes('error')) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body: `<key state="press" sender="Gabbo">PLAY</key>`
-        });
-        
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body: `<key state="release" sender="Gabbo">PLAY</key>`
-        });
-        
-        setTimeout(() => fetchNowPlaying(deviceIP), 500);
-        setShowManualAdd(false);
-        setManualStationId('');
-        setManualStationName('');
-        setError(null);
-      } else {
-        setError('Failed to play station');
-      }
-    } catch (err) {
-      console.error('Failed to add manual station:', err);
-      setError('Failed to add station');
     }
   };
 
@@ -423,11 +451,11 @@ export default function BoseSoundTouchController() {
               <Power className="w-5 h-5" />
             </button>
             <button
-              onClick={() => setShowManualAdd(true)}
+              onClick={() => setShowSearch(true)}
               className="p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
-              title="Add Station by ID"
+              title="Search Radio Stations"
             >
-              <Plus className="w-5 h-5" />
+              <Search className="w-5 h-5" />
             </button>
             <button
               onClick={() => setShowSettings(!showSettings)}
@@ -568,65 +596,59 @@ export default function BoseSoundTouchController() {
           )}
         </div>
 
-        {showManualAdd && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setShowManualAdd(false)}>
-            <div className="bg-slate-800 rounded-2xl p-6 max-w-md w-full border border-slate-700" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Station by ID</h3>
+        {showSearch && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setShowSearch(false)}>
+            <div className="bg-slate-800 rounded-2xl p-6 max-w-2xl w-full border border-slate-700 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-xl font-bold mb-4">Search Radio Stations</h3>
               
-              <div className="space-y-4 mb-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Station ID</label>
-                  <input
-                    type="text"
-                    placeholder="e.g., s254741"
-                    value={manualStationId}
-                    onChange={(e) => setManualStationId(e.target.value)}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">TuneIn station ID</p>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Station Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g., Radio X UK"
-                    value={manualStationName}
-                    onChange={(e) => setManualStationName(e.target.value)}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  />
-                </div>
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  placeholder="Search 90,000+ stations worldwide..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && searchRadioStations(searchQuery)}
+                  className="flex-1 px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  autoFocus
+                />
+                <button
+                  onClick={() => searchRadioStations(searchQuery)}
+                  disabled={searching}
+                  className="px-6 py-2 bg-orange-500 hover:bg-orange-600 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {searching ? 'Searching...' : 'Search'}
+                </button>
               </div>
 
-              <div className="bg-slate-700 rounded-lg p-3 mb-4 text-sm">
-                <p className="text-slate-300 mb-2">Popular UK station IDs:</p>
-                <div className="space-y-1 text-slate-400">
-                  <p>• BBC Radio 1: <code className="text-orange-400">s24939</code></p>
-                  <p>• BBC Radio 2: <code className="text-orange-400">s24940</code></p>
-                  <p>• Radio X UK: <code className="text-orange-400">s254741</code></p>
-                  <p>• Classic FM: <code className="text-orange-400">s8439</code></p>
-                  <p>• Absolute Radio: <code className="text-orange-400">s44491</code></p>
+              {searchResults.length > 0 && (
+                <div className="space-y-2">
+                  {searchResults.map((result, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => playRadioStation(result)}
+                      className="w-full bg-slate-700 hover:bg-slate-600 rounded-lg p-3 text-left transition-colors"
+                    >
+                      <p className="font-medium">{result.name}</p>
+                      <p className="text-xs text-slate-400">
+                        {result.country && `${result.country} • `}
+                        {result.tags && result.tags.split(',')[0]}
+                        {result.bitrate && ` • ${result.bitrate} kbps`}
+                      </p>
+                    </button>
+                  ))}
                 </div>
-              </div>
-              
-              <div className="flex gap-2">
-                <button
-                  onClick={addManualStation}
-                  className="flex-1 bg-orange-500 hover:bg-orange-600 text-white py-2 rounded-lg transition-colors"
-                >
-                  Play Station
-                </button>
-                <button
-                  onClick={() => {
-                    setShowManualAdd(false);
-                    setManualStationId('');
-                    setManualStationName('');
-                  }}
-                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
+              )}
+
+              {!searching && searchResults.length === 0 && searchQuery && (
+                <p className="text-slate-400 text-center py-8">No results found. Try a different search.</p>
+              )}
+
+              <button
+                onClick={() => setShowSearch(false)}
+                className="w-full mt-4 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg transition-colors"
+              >
+                Close
+              </button>
             </div>
           </div>
         )}
