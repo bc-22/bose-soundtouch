@@ -23,6 +23,7 @@ export async function GET(request) {
       },
     });
   } catch (error) {
+    console.error('GET Error:', error);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
@@ -33,14 +34,26 @@ export async function POST(request) {
   const ip = searchParams.get('ip');
   
   if (!endpoint || !ip) {
-    return Response.json({ error: 'Missing parameters' }, { status: 400 });
+    console.error('Missing parameters:', { endpoint, ip });
+    return Response.json({ error: 'Missing endpoint or ip parameter' }, { status: 400 });
   }
 
   try {
-    // Get the raw body text
-    const body = await request.text();
+    // Get the raw body - this is critical for XML
+    let body = '';
     
-    console.log('Sending to Bose:', endpoint, body); // Debug log
+    try {
+      body = await request.text();
+      console.log(`POST to ${endpoint}:`, body);
+    } catch (e) {
+      console.error('Failed to read body:', e);
+      return Response.json({ error: 'Failed to read request body' }, { status: 400 });
+    }
+    
+    if (!body) {
+      console.error('Empty body received');
+      return Response.json({ error: 'Request body is empty' }, { status: 400 });
+    }
     
     const response = await fetch(`http://${ip}:8090${endpoint}`, {
       method: 'POST',
@@ -51,7 +64,7 @@ export async function POST(request) {
     });
     
     const text = await response.text();
-    console.log('Bose response:', text); // Debug log
+    console.log(`Response from ${endpoint}:`, text);
     
     return new Response(text, {
       status: response.status,
@@ -61,7 +74,7 @@ export async function POST(request) {
       },
     });
   } catch (error) {
-    console.error('API Error:', error);
+    console.error('POST Error:', error);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
