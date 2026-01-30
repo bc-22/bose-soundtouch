@@ -65,7 +65,7 @@ export default function BoseSoundTouchController() {
       await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: `<key state="press" sender="BoseApp">POWER</key>`
+        body: `<key state="press" sender="Gabbo">POWER</key>`
       });
       
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -73,7 +73,7 @@ export default function BoseSoundTouchController() {
       await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: `<key state="release" sender="BoseApp">POWER</key>`
+        body: `<key state="release" sender="Gabbo">POWER</key>`
       });
       
       setIsPoweredOn(!isPoweredOn);
@@ -172,7 +172,7 @@ export default function BoseSoundTouchController() {
         await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
-          body: `<key state="press" sender="BoseApp">PLAY</key>`
+          body: `<key state="press" sender="Gabbo">PLAY</key>`
         });
         
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -180,7 +180,7 @@ export default function BoseSoundTouchController() {
         await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
-          body: `<key state="release" sender="BoseApp">PLAY</key>`
+          body: `<key state="release" sender="Gabbo">PLAY</key>`
         });
         
         setTimeout(() => fetchNowPlaying(deviceIP), 500);
@@ -227,7 +227,7 @@ export default function BoseSoundTouchController() {
       await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: `<key state="press" sender="BoseApp">${key}</key>`
+        body: `<key state="press" sender="Gabbo">${key}</key>`
       });
       
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -235,7 +235,7 @@ export default function BoseSoundTouchController() {
       await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: `<key state="release" sender="BoseApp">${key}</key>`
+        body: `<key state="release" sender="Gabbo">${key}</key>`
       });
     } catch (err) {
       console.error('Failed to send key:', err);
@@ -322,7 +322,7 @@ export default function BoseSoundTouchController() {
       await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: `<key state="press" sender="BoseApp">PLAY</key>`
+        body: `<key state="press" sender="Gabbo">PLAY</key>`
       });
       
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -330,7 +330,7 @@ export default function BoseSoundTouchController() {
       await fetch(`/api/bose?endpoint=/key&ip=${deviceIP}`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: `<key state="release" sender="BoseApp">PLAY</key>`
+        body: `<key state="release" sender="Gabbo">PLAY</key>`
       });
       
       setTimeout(() => fetchNowPlaying(deviceIP), 500);
